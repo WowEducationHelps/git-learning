@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<!--
+  Cost. — Liquid Budget prototype
+  VERSION HISTORY (newest first). The number is shown bottom-left of the screen.
+  v0.29  header text larger: wordmark 42px, episode 13px, brief 14px
+  v0.28  fix: band fade variable declared before use
+  v0.27  softer band and plinth edges; larger plinth figures
+  v0.26  readable without words: bright liquid = free cash, darker band = this month's bills,
+         plinth = committed; overdue money is a crimson stain at the surface; red mark on Actions
+  v0.25  cash model: liquid = cash available after commitments; 30-day cover line; plinth shows
+         Available / Due this week / Projected finish; Dot's one-line brief; drawdowns in
+  v0.24  serious pass: Dot is a plain orb (eyes only while speaking); schedule line on the glass;
+         liquid cools when behind or overdue; sync/source line; $500k-scale data; calmer motion
+  v0.23  version tag; gradual gravity flip (liquid falls, interface re-emerges)
+  v0.22  mobile perf: no canvas blur, 1.5x DPR, coarser surface sampling
+  v0.21  number shrinks to fit above the water; tighter header
+  v0.20  tilt capped at 12° (tighter on wide screens); flat committed plinth
+  v0.19  Dot always visible, floats at the surface, bounded forces
+  v0.18  desktop scale unit; swipe speed sets pour speed; Dot reaches the walls
+  v0.17  powder transition into Invoices; Dot reacts to tilt
+  v0.16  digits climb with the number; smoother pour; single spill pool
+  v0.15  number rides the wave; tip direction changes
+  v0.14  Invoices spill page; 3D stage
+  v0.13  number drawn in canvas, submerged rendering
+  v0.12  liquidity inversion: liquid = remaining, committed layer
+  v0.11  sideways pour between productions; Take Action sheet
+  v0.10  first two productions, swipe
+  v0.1   initial liquid dashboard
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>Cost. — Liquid Budget v0.23</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --cream:#FAF5EA; --cream-2:#F4EBDB;
+    --ink:#161310;
+    --dot:#F2A24A;             /* Dot / period orange */
+    --gold-ink:#8C6A35;        /* type sitting near the liquid */
+    --amber-deep:#7A4B0E;
+    --panel:#2A2724;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;background:var(--cream);
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;
+    touch-action:none;overscroll-behavior:none}
+  body{font-family:"Inter",-apple-system,system-ui,sans-serif;color:var(--ink);
+    background:radial-gradient(120% 90% at 50% 0%,#FDF9F1 0%,var(--cream) 55%,var(--cream-2) 100%)}
+
+  #stage{position:fixed;inset:0;perspective:900px;perspective-origin:50% 30%}
+  #scene{position:absolute;inset:0;transition:opacity 1.4s ease .7s,filter 1.6s ease .3s}
+  #scene.laid{opacity:0;filter:blur(14px)}
+  canvas#liquid{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+  #stage,#scene{touch-action:none}
+  #overlay{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none;will-change:transform}
+  #overlay > *{pointer-events:auto}
+
+  /* ---------- interface layer: rotates as one object ---------- */
+  #ui{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    pointer-events:none;will-change:transform}
+  #ui > *{pointer-events:auto;transition:opacity .35s ease}
+  #ui.flipping > *{opacity:0 !important;pointer-events:none;transition:opacity .35s ease}
+  #ui.emerging > *{transition:opacity 1.1s ease,transform 1.1s cubic-bezier(.2,.7,.2,1)}
+  @media (min-width:900px){ .brand{font-size:44px} .figs strong{font-size:34px} .act{width:46px;height:46px} .figs{left:40px;right:40px} }
+  .brand{position:absolute;left:24px;top:calc(18px + env(safe-area-inset-top));
+    font-family:"Cormorant Garamond",Georgia,serif;font-weight:400;font-size:42px;letter-spacing:-.02em;
+    line-height:1;color:var(--ink);pointer-events:none}
+  .brand b{color:var(--dot);font-weight:500}
+  .prod{position:absolute;left:26px;top:calc(70px + env(safe-area-inset-top));font-size:13px;letter-spacing:.14em;
+    text-transform:uppercase;color:#9A8A70;pointer-events:none}
+
+  /* action control */
+  .act{position:absolute;right:20px;top:calc(16px + env(safe-area-inset-top));width:44px;height:44px;border-radius:50%;
+    border:2px solid #F2A24A;background:#161310;box-shadow:0 10px 26px rgba(40,25,5,.35);z-index:5;
+    display:grid;place-items:center;cursor:pointer;transition:transform .25s cubic-bezier(.2,.8,.2,1)}
+  .act:active{transform:scale(.92)}
+  .act.owed::after{content:"";position:absolute;top:-1px;right:-1px;width:12px;height:12px;border-radius:50%;background:#B8202A;box-shadow:0 0 0 2px var(--cream)}
+  .act.open{background:#F2A24A} .act.open svg{stroke:#161310;transform:rotate(45deg)} .act svg{transition:transform .3s}
+  .act svg{width:22px;height:22px;stroke:#F2A24A;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .act:focus-visible{outline:2px solid var(--dot);outline-offset:3px}
+
+  .menu{position:absolute;right:20px;top:calc(72px + env(safe-area-inset-top));width:236px;z-index:6;
+    background:var(--panel);color:#F6EEDF;border-radius:20px;padding:6px 0;
+    box-shadow:0 24px 60px rgba(40,25,5,.4),0 0 0 1px rgba(255,255,255,.06);
+    opacity:0;transform:translateY(-8px) scale(.96);transform-origin:top right;
+    transition:opacity .22s ease,transform .28s cubic-bezier(.2,.8,.2,1);visibility:hidden}
+  .menu.open{opacity:1;transform:none;visibility:visible}
+  .menu::before{content:"";position:absolute;top:-6px;right:20px;width:12px;height:12px;background:var(--panel);transform:rotate(45deg);border-radius:2px}
+  .menu button{display:flex;align-items:center;gap:14px;width:100%;padding:14px 20px;border:0;background:none;color:inherit;text-align:left;cursor:pointer;font:inherit}
+  .menu button + button{border-top:1px solid rgba(255,255,255,.08)}
+  .menu button:active{background:rgba(255,255,255,.05)}
+  .menu svg{width:20px;height:20px;stroke:#E6D9C2;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none}
+  .menu strong{display:block;font-weight:500;font-size:15px;letter-spacing:-.01em}
+  .menu strong.hot{color:#F0B25F}
+  .menu span{display:block;font-size:12.5px;color:#A79C89;margin-top:2px}
+
+  /* budget used */
+  .pct{position:absolute;left:0;right:0;text-align:center;pointer-events:none;
+    transform:translateY(-100%)}
+  .slide{transition:opacity .6s ease,transform .9s cubic-bezier(.2,.8,.2,1)}
+  .pct .eyebrow{font-size:11px;letter-spacing:.32em;text-transform:uppercase;color:var(--gold-ink);opacity:.85}
+  .pct .eyebrow::before,.pct .eyebrow::after{content:"·";margin:0 14px;opacity:.6}
+  .pct .num{font-family:"Cormorant Garamond",Georgia,serif;font-weight:300;font-size:132px;line-height:.9;
+    color:var(--gold-ink);letter-spacing:-.03em;margin-top:8px}
+  .pct .num small{font-size:48px;vertical-align:baseline;margin-left:6px;letter-spacing:0}
+
+  /* bottom figures */
+  .figs{position:absolute;left:28px;right:28px;bottom:calc(48px + env(safe-area-inset-bottom));display:flex;justify-content:space-between;
+    pointer-events:none;color:#FFF5E3}
+  .figs div{display:flex;flex-direction:column;gap:7px}
+  .figs div:nth-child(2){text-align:center}
+  .figs div:nth-child(3){text-align:right}
+  .figs label{font-size:10px;letter-spacing:.2em;text-transform:uppercase;opacity:.78}
+  .figs strong{font-family:"Cormorant Garamond",Georgia,serif;font-weight:500;font-size:30px;letter-spacing:-.01em;color:#FFF8EC}
+  .meta{position:absolute;left:28px;right:28px;bottom:calc(16px + env(safe-area-inset-bottom));font-size:10.5px;letter-spacing:.06em;color:rgba(255,235,205,.55);pointer-events:none;display:flex;justify-content:space-between}
+  .meta b{font-weight:500;color:rgba(255,235,205,.75)}
+
+  /* speech */
+  .say{position:absolute;left:50%;bottom:calc(104px + env(safe-area-inset-bottom));transform:translate(-50%,6px);
+    max-width:78%;padding:11px 16px;border-radius:16px;
+    background:rgba(255,250,240,.86);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+    color:#3A2A12;font-size:13.5px;line-height:1.4;text-align:center;
+    box-shadow:0 10px 30px rgba(90,55,10,.15);opacity:0;transition:opacity .3s,transform .4s cubic-bezier(.2,.8,.2,1);pointer-events:none}
+  .say.on{opacity:1;transform:translate(-50%,0)}
+
+  /* permission */
+  .perm{position:fixed;left:50%;bottom:calc(26% + env(safe-area-inset-bottom));transform:translateX(-50%);
+    padding:12px 22px;border-radius:999px;border:1px solid rgba(140,106,53,.35);
+    background:rgba(255,250,240,.9);color:var(--gold-ink);font:500 13px/1 "Inter",sans-serif;letter-spacing:.06em;
+    cursor:pointer;box-shadow:0 10px 30px rgba(90,55,10,.12);z-index:20;display:none}
+  .perm.show{display:block}
+
+  /* ---------- DEV ONLY: remove this block + #dev markup + Dev module later ---------- */
+  #dev{position:fixed;left:12px;bottom:12px;z-index:30;display:none;
+    background:rgba(20,18,15,.82);color:#EADFCB;border-radius:14px;padding:10px;font-size:11px;
+    backdrop-filter:blur(8px);width:190px;font-family:ui-monospace,Menlo,monospace}
+  #dev.show{display:block}
+  #dev .row{display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap}
+  #dev button{flex:1;padding:6px 4px;border:0;border-radius:8px;background:#3A352E;color:inherit;font:inherit;cursor:pointer}
+  #dev button:hover{background:#4A4238}
+  #dev .pad{position:relative;height:110px;border-radius:10px;background:#2A2723;cursor:crosshair;overflow:hidden}
+  #dev .pad i{position:absolute;width:12px;height:12px;border-radius:50%;background:var(--dot);left:50%;top:50%;transform:translate(-50%,-50%)}
+  #dev .pad::before,#dev .pad::after{content:"";position:absolute;background:#3D3730}
+  #dev .pad::before{left:50%;top:0;bottom:0;width:1px}#dev .pad::after{top:50%;left:0;right:0;height:1px}
+  #dev p{opacity:.6;margin-top:6px;line-height:1.5}
+
+  /* production pager */
+  .brief{position:absolute;left:26px;right:88px;top:calc(94px + env(safe-area-inset-top));font-size:14px;line-height:1.5;color:#5C4A2E;max-width:420px;pointer-events:none}
+  .figs strong small{font-size:12px;font-family:Inter,sans-serif;font-weight:500;letter-spacing:.08em;text-transform:uppercase;margin-left:4px;opacity:.75}
+  .figs strong.over small{color:#F2B8A0}
+  .pager{position:absolute;left:0;right:0;top:calc(30px + env(safe-area-inset-top));display:flex;justify-content:center;gap:7px;pointer-events:none}
+  .pager i{width:5px;height:5px;border-radius:50%;background:#C9B48F;opacity:.5;transition:all .3s}
+  .pager i.on{background:var(--dot);opacity:1;width:16px;border-radius:3px}
+  .fade{transition:opacity .25s}
+  .fade.out{opacity:0}
+
+  /* Take Action screen */
+  .ver{position:absolute;right:24px;bottom:calc(2px + env(safe-area-inset-bottom));font-size:9px;letter-spacing:.12em;color:rgba(255,235,205,.45);pointer-events:none;font-family:ui-monospace,Menlo,monospace}
+  .sheet{position:absolute;inset:0;background:rgba(250,245,234,.92);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+    transform:translateY(100%);transition:transform .5s cubic-bezier(.2,.8,.2,1);display:flex;flex-direction:column;
+    padding:calc(18px + env(safe-area-inset-top)) 22px calc(20px + env(safe-area-inset-bottom));touch-action:pan-y}
+  .sheet.open{transform:none}
+  .sheet header{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+  .sheet header button{width:40px;height:40px;border-radius:50%;border:0;background:#FFF9EF;box-shadow:0 6px 18px rgba(120,80,20,.12);font-size:18px;color:var(--gold-ink);cursor:pointer}
+  .sheet h2{font-family:"Cormorant Garamond",Georgia,serif;font-weight:400;font-size:34px;letter-spacing:-.02em;line-height:1}
+  .sheet h2 b{color:var(--dot);font-weight:500}
+  .sheet .sub{font-size:12px;color:#9A8A70;letter-spacing:.06em;margin-top:6px}
+  .sheet .list{overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch;padding-bottom:20px}
+  .item{display:flex;gap:14px;align-items:flex-start;padding:16px 0;border-bottom:1px solid rgba(140,106,53,.16)}
+  .item .d{width:10px;height:10px;border-radius:50%;margin-top:6px;flex:none;background:var(--dot)}
+  .item .d.late{background:#C8462B}.item .d.soft{background:#C9B48F}
+  .item .t{flex:1}
+  .item strong{display:block;font-weight:500;font-size:15px;letter-spacing:-.01em}
+  .item span{display:block;font-size:12.5px;color:#8A7A60;margin-top:3px;line-height:1.4}
+  .item em{font-style:normal;font-family:"Cormorant Garamond",Georgia,serif;font-size:20px;font-weight:500;white-space:nowrap}
+  .item .chips{display:flex;gap:6px;margin-top:10px}
+  .chip{padding:6px 12px;border-radius:999px;font-size:11.5px;font-weight:500;border:1px solid rgba(140,106,53,.3);background:transparent;color:var(--gold-ink);cursor:pointer;font-family:inherit}
+  .chip.primary{background:var(--ink);color:#FAF5EA;border-color:var(--ink)}
+  .item.done{opacity:.35;transition:opacity .4s}
+  /* the table: the screen itself. liquid splashes onto it, then the invoices come through the puddle */
+  .paper{background:var(--cream);backdrop-filter:none;-webkit-backdrop-filter:none;overflow:hidden;
+    transform:none;opacity:0;visibility:hidden;transition:opacity .6s ease,visibility 0s linear .6s}
+  .paper.open{opacity:1;visibility:visible;transition:opacity 1.2s ease,visibility 0s}
+  .splash{position:absolute;inset:0;pointer-events:none}
+  canvas.puddle{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .paper header,.paper .inv,.paper .empty{opacity:0;filter:blur(10px);transform:scale(1.03);position:relative}
+  .paper .inv{border-bottom-color:rgba(60,35,5,.14)}
+  .paper.open header,.paper.open .inv,.paper.open .empty{animation:emerge 1.1s cubic-bezier(.2,.7,.2,1) forwards}
+  @keyframes emerge{to{opacity:1;filter:blur(0);transform:none}}
+  .paper .list{position:relative}
+  .inv{display:flex;align-items:center;gap:14px;padding:16px 0;border-bottom:1px solid rgba(140,106,53,.14)}
+  .inv .t{flex:1}
+  .inv strong{display:block;font-weight:500;font-size:15px}
+  .inv span{display:block;font-size:12px;color:#8A7A60;margin-top:3px}
+  .inv em{font-style:normal;font-family:"Cormorant Garamond",Georgia,serif;font-size:21px;font-weight:500}
+  .inv .st{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--gold-ink);margin-top:4px}
+  .inv.late .st{color:#C8462B}.inv.paid{opacity:.5}
+  .sheet .empty{text-align:center;color:#9A8A70;font-size:13px;padding:40px 0}
+</style>
+</head>
+<body>
+
+<div id="stage"><div id="scene">
+<canvas id="liquid"></canvas>
+
+<div id="ui">
+  <div class="brand">Cost<b>.</b></div>
+  <div class="prod fade" id="prod"></div>
+  <div class="brief fade" id="brief"></div>
+  <div class="pager" id="pager"></div>
+
+  <button class="act" id="actBtn" aria-label="Actions" aria-expanded="false">
+    <svg viewBox="0 0 24 24"><path d="M7 17 17 7M9 7h8v8"/></svg>
+  </button>
+  <div class="menu" id="menu" role="menu">
+    <button role="menuitem" data-act="attention"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l2.5 2"/><circle cx="18.5" cy="6" r="1.6" fill="#F0B25F" stroke="none"/></svg><div><strong class="hot">Take Action</strong><span>See what needs attention</span></div></button>
+    <button role="menuitem" data-act="invoices"><svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6"/></svg><div><strong>Invoices</strong><span>View invoices</span></div></button>
+    <button role="menuitem" data-act="net30"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M8 3v4M16 3v4"/></svg><div><strong>Net 30s</strong><span>See upcoming payment terms</span></div></button>
+    <button role="menuitem" data-act="payments"><svg viewBox="0 0 24 24"><path d="M12 4v12M7 11l5 5 5-5M5 20h14"/></svg><div><strong>Payments</strong><span>Track payments</span></div></button>
+    <button role="menuitem" data-act="reports"><svg viewBox="0 0 24 24"><path d="M6 20V12M12 20V6M18 20v-4"/></svg><div><strong>Reports</strong><span>View financials</span></div></button>
+  </div>
+
+
+  <div class="figs">
+    <div><label>Free to spend</label><strong id="fTotal"></strong></div>
+    <div><label>Due this week</label><strong id="fSpent"></strong></div>
+    <div><label>Projected finish</label><strong id="fRemain"></strong></div>
+  </div>
+
+  <div class="say" id="say" aria-live="polite"></div>
+  <div class="meta"><span id="synced"></span><span id="flag"></span></div>
+  <div class="ver" id="ver"></div>
+
+  <section class="sheet" id="sheet" aria-hidden="true">
+    <header><button id="sheetBack" aria-label="Back">←</button><div><h2>Take action<b>.</b></h2><div class="sub" id="sheetSub"></div></div></header>
+    <div class="list" id="sheetList"></div>
+  </section>
+</div>
+
+</div></div>
+
+<div id="overlay">
+  <section class="sheet paper" id="paper" aria-hidden="true">
+    <div class="splash" id="splash"></div>
+    <header><button id="paperBack" aria-label="Back">←</button><div><h2>Invoices<b>.</b></h2><div class="sub" id="paperSub"></div></div></header>
+    <div class="list" id="paperList"></div>
+  </section>
+</div>
+
+<button class="perm" id="perm">Enable motion</button>
+
+<!-- DEV ONLY -->
+<div id="dev">
+  <div class="row">
+    <button data-o="0">Portrait</button><button data-o="-90">Land L</button>
+  </div>
+  <div class="row">
+    <button data-o="90">Land R</button><button data-o="180">Upside</button>
+  </div>
+  <div class="pad" id="pad"><i></i></div>
+  <p>drag pad · ←→ rotate · D hides</p>
+</div>
+
+<script>
+/* ============================================================
+   COST. — LIQUID BUDGET PROTOTYPE
+   Data lives in CONFIG. Replace with Cost. backend later.
+   ============================================================ */
+const VERSION = '0.29';                 // bump this with every change
+const CONFIG = {
+  productions: [
+    { name:'Episode 9',
+      budget:500000, costToDate:262400, committed:61800, etc:188600,     // cost report: EFC = cost to date + committed + estimate to complete
+      cash:214000,                                                       // in the production account right now
+      obligations:[                                                      // money going out, with days until due (negative = overdue)
+        {t:'Payroll · Week 4', who:'38 crew', amt:64750, days:3, kind:'payroll'},
+        {t:'Lux Grip & Electric #2231', who:'Net 30', amt:38400, days:-1, kind:'net30'},
+        {t:'Set Table Co. deposit', who:'Catering', amt:9200, days:4, kind:'deposit'},
+        {t:'City Film Office permit', who:'Location', amt:1650, days:6, kind:'fee'},
+        {t:'Panavision #77410', who:'Net 30', amt:22000, days:18, kind:'net30'},
+      ],
+      drawdown:{amt:150000, date:'Sep 15', who:'Financier tranche 3'},
+      approvals:[{t:'Timecards — Week 4', s:'38 crew · from 1st AD', amt:64750},{t:'Art dept PO — set build', s:'Needs sign-off', amt:14300}],
+      synced:'Synced 2 min ago · Chase + ledger',
+      invoices:[
+        {v:'Lux Grip & Electric', n:'#2231', amt:38400, st:'Net 30 · overdue 1 day', k:'late'},
+        {v:'Set Table Co.', n:'#0189', amt:9200, st:'Due in 4 days', k:''},
+        {v:'Panavision', n:'#77410', amt:22000, st:'Net 30 · due in 18 days', k:''},
+        {v:'City Film Office', n:'#P-1194', amt:1650, st:'Due in 6 days', k:''},
+        {v:'Wardrobe House', n:'#5580', amt:13120, st:'Paid Aug 4', k:'paid'},
+        {v:'Craft Services LLC', n:'#0921', amt:7875, st:'Paid Jul 30', k:'paid'},
+      ]},
+    { name:'Episode 10',
+      budget:480000, costToDate:118300, committed:46200, etc:300500,
+      cash:236000,
+      obligations:[
+        {t:'Payroll · Week 2', who:'34 crew', amt:41200, days:3, kind:'payroll'},
+        {t:'Panavision deposit', who:'Camera package', amt:42000, days:5, kind:'deposit'},
+        {t:'Build Shop Art Dept #3301', who:'Net 30', amt:14300, days:12, kind:'net30'},
+      ],
+      drawdown:{amt:120000, date:'Sep 30', who:'Financier tranche 2'},
+      approvals:[{t:'Art dept PO — materials', s:'Needs sign-off', amt:14300}],
+      synced:'Synced 2 min ago · Chase + ledger',
+      invoices:[
+        {v:'Panavision', n:'#77502', amt:42000, st:'Deposit · due in 5 days', k:''},
+        {v:'Build Shop Art Dept', n:'#3301', amt:14300, st:'Net 30 · due in 12 days', k:''},
+        {v:'Sound & Co.', n:'#0402', amt:12650, st:'Paid Aug 20', k:'paid'},
+      ]},
+  ],
+  currency: 'USD',
+  DEV_CONTROLS: false,         // press D on desktop to show the simulator
+};
+const fmt = n => new Intl.NumberFormat('en-US',{style:'currency',currency:CONFIG.currency,maximumFractionDigits:0}).format(n);
+let cur = 0;                                   // active production index
+let FILL = 0, fillTarget = 0;                  // liquid fraction (by area); FILL = outgoing level during a pour
+const pour = { on:false, p:0, dir:1, from:0, to:0, next:0, manual:false, rate:0, textOn:0 };   // sideways pour, driven by the finger
+const num = { y:0, vy:0, size:0 };
+let DRAIN=0, drainTarget=0;                              // 1 = liquid has spilled out onto the page                              // the percentage, as a floating object
+let numShown = 0, drawNum = null, pourTail = 0;
+const $ = id => document.getElementById(id);
+function prodOf(i){
+  const p=CONFIG.productions[i];
+  const efc = p.costToDate + p.committed + p.etc;
+  const variance = p.budget - efc;                                   // + under, − over
+  const available = p.cash - p.committed;                            // what's actually liquid
+  const ob = p.obligations||[];
+  const due7  = ob.filter(o=>o.days<=7).reduce((t,o)=>t+o.amt,0);
+  const due30 = ob.filter(o=>o.days<=30).reduce((t,o)=>t+o.amt,0);
+  const overdue = ob.filter(o=>o.days<0);
+  const payroll = ob.find(o=>o.kind==='payroll');
+  const clear = available - due30;                                   // headroom after 30 days of obligations
+  return {...p, efc, variance, available, due7, due30, overdue, payroll, clear,
+    fill: Math.min(1,Math.max(0, available/p.budget)),               // the glass is scaled to the budget
+    cover: Math.min(1,Math.max(0, due30/p.budget)),                  // the safety line: 30 days of obligations
+    commitFrac: Math.min(1,Math.max(0, p.committed/p.budget)),
+    concern: (clear<0 || variance<0) ? 1 : 0,
+    // the hallway brief
+    brief: (()=>{
+      const bits=[];
+      if(payroll) bits.push(available>=payroll.amt ? `Payroll ${dayName(payroll.days)} (${fmt(payroll.amt)}) is covered.` : `Payroll ${dayName(payroll.days)} needs the ${p.drawdown.date} drawdown.`);
+      if(overdue.length){ const o=overdue[0]; bits.push(`${o.t.split(' #')[0]} ${fmt(o.amt)} is ${-o.days} day${-o.days===1?'':'s'} overdue` + (clear>0? ` — pay it and you still have ${fmt(clear)} after this month's bills.` : '.')); }
+      else bits.push(clear>0 ? `${fmt(clear)} left after this month's bills.` : `${fmt(-clear)} short for this month's bills until the ${p.drawdown.date} drawdown.`);
+      bits.push(`Tracking ${fmt(Math.abs(variance))} ${variance<0?'over':'under'} at wrap.`);
+      return bits.join(' ');
+    })()
+  };
+}
+function dayName(d){ const names=['Sun','Mon','Tue','Wed','Thu','Fri','Sat']; const dt=new Date(); dt.setDate(dt.getDate()+d); return d===0?'today':d===1?'tomorrow':names[dt.getDay()]; }
+let MOOD=0, moodTarget=0, COVER=null, coverTarget=null;
+let COMMIT=0, commitTarget=0;
+let prevIndex=0;
+function pager(){ $('pager').innerHTML = CONFIG.productions.map((_,k)=>`<i class="${k===cur?'on':''}"></i>`).join(''); }
+function showText(i, dir){
+  const p=prodOf(i), els=[$('prod'),$('brief'),$('fTotal'),$('fSpent'),$('fRemain'),$('synced'),$('flag')];
+  const apply=()=>{ $('prod').textContent=p.name; $('brief').textContent=p.brief;
+    $('fTotal').textContent=fmt(p.available); $('fSpent').textContent=fmt(p.due7);
+    $('fRemain').innerHTML=`${fmt(Math.abs(p.variance))}<small>${p.variance<0?'over':'under'}</small>`; $('fRemain').classList.toggle('over',p.variance<0);
+    $('actBtn').classList.toggle('owed', p.overdue.length>0);
+    $('synced').textContent=p.synced||''; $('flag').innerHTML = `Next drawdown <b>${fmt(p.drawdown.amt)} · ${p.drawdown.date}</b>`; };
+  if(dir===0){ apply(); return; }
+  els.forEach(e=>{e.classList.add('slide'); e.style.opacity=0; e.style.transform=`translateX(${-dir*36}px)`;});
+  setTimeout(()=>{ apply(); els.forEach(e=>{e.style.transition='none'; e.style.transform=`translateX(${dir*36}px)`; void e.offsetWidth; e.style.transition=''; e.style.opacity=1; e.style.transform='';}); },650);
+}
+function showProduction(i, instant){
+  cur = i; const p = prodOf(i);
+  fillTarget = p.fill; commitTarget = p.commitFrac; moodTarget=p.concern; coverTarget=p.cover;
+  if(instant){ FILL = p.fill; COMMIT = p.commitFrac; MOOD=p.concern; COVER=p.cover; }
+  showText(i, instant?0:(i>prevIndex?1:-1)); prevIndex=i; pager();
+}
+['fTotal','fSpent','fRemain'].forEach(id=>$(id).classList.add('fade'));
+$('ver').textContent='v'+VERSION; document.title='Cost. — Liquid Budget v'+VERSION;
+showProduction(0, true);
+
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------------- Assistant hook (swap for the real Cost. AI) -------------- */
+const Assistant = {
+  async respond(ctx){
+    return `${ctx.production}. ${ctx.brief}`;
+  },
+  speak(text){
+    if(!('speechSynthesis' in window)) return;
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text); u.rate = 1; u.pitch = 1.05;
+    speechSynthesis.speak(u);
+  }
+};
+
+/* ---------------- Canvas + geometry ---------------- */
+const cv = document.getElementById('liquid'), ctx = cv.getContext('2d');
+let W=0, H=0, DPR=1, U=1;                       // U = layout unit, capped so desktop stays calm
+function resize(){
+  DPR = Math.min(matchMedia('(pointer:coarse)').matches?1.5:2, devicePixelRatio||1);
+  W = innerWidth; H = innerHeight; U = Math.min(Math.min(W,H), 440);
+  cv.width = W*DPR; cv.height = H*DPR; ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+addEventListener('resize', resize); resize();
+
+/* gravity direction in screen coords (unit vector), target from sensors */
+const grav = { x:0, y:1 };          // target
+const S = {                          // smoothed state
+  theta: 0, omega: 0,                // container angle in gravity frame + angular velocity
+  slosh: 0, sloshV: 0,               // surface tilt (spring)
+  amp: 0, phase: 0,                  // travelling wave amplitude
+  t: 0
+};
+// theta such that rotating (0,1) by theta gives gravity: theta = atan2(-gx, gy)
+const angleOf = g => Math.atan2(-g.x, g.y);
+const hex2=h=>[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];
+function mix(a,b,t){ const A=hex2(a),B=hex2(b); return `rgb(${A.map((v,i)=>Math.round(v+(B[i]-v)*t)).join(',')})`; }
+const MAX_TILT_DEG = 12;               // how far the surface may lean from the interface's down
+const maxTilt = () => Math.min(MAX_TILT_DEG*Math.PI/180, Math.atan(0.14*H/W));   // never more than ~14% rise across the width
+const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
+
+/* liquid surface height along gravity for a given container angle: area-conserving.
+   Rectangle W×H is rotated into the gravity frame; find sy so that area{y>=sy} = FILL*W*H */
+function rectInFrame(theta){
+  const c=Math.cos(theta), s=Math.sin(theta), hw=W/2, hh=H/2;
+  // frame = R(-theta) * screen
+  return [[-hw,-hh],[hw,-hh],[hw,hh],[-hw,hh]].map(([x,y])=>[ x*c + y*s, -x*s + y*c ]);
+}
+function areaBelow(poly, sy){
+  const out=[];
+  for(let i=0;i<poly.length;i++){
+    const a=poly[i], b=poly[(i+1)%poly.length];
+    const ina=a[1]>=sy, inb=b[1]>=sy;
+    if(ina) out.push(a);
+    if(ina!==inb){ const t=(sy-a[1])/(b[1]-a[1]); out.push([a[0]+(b[0]-a[0])*t, sy]); }
+  }
+  let A=0; for(let i=0;i<out.length;i++){ const p=out[i], q=out[(i+1)%out.length]; A+=p[0]*q[1]-q[0]*p[1]; }
+  return Math.abs(A)/2;
+}
+function surfaceLevel(theta, fill=FILL){
+  const poly=rectInFrame(theta), target=fill*W*H, R=Math.hypot(W,H)/2;
+  let lo=-R, hi=R;
+  for(let i=0;i<28;i++){ const m=(lo+hi)/2; (areaBelow(poly,m)>target)?lo=m:hi=m; }
+  return (lo+hi)/2;
+}
+
+/* wave shape in frame coordinates */
+const motionScale = REDUCED ? 0.25 : 1;
+let pourSy2=0, pourBx=0, pourDir=1;
+const smooth=t=>{t=Math.max(0,Math.min(1,t)); return t*t*(3-2*t)};
+const ease5=t=>{t=Math.max(0,Math.min(1,t)); return t<.5?16*t*t*t*t*t:1-Math.pow(-2*t+2,5)/2};
+function surfaceY(x, sy){
+  if(pour.on){
+    // new level takes over on the side the swipe came from and sweeps across, with a crest at the front
+    const k=smooth((x-pourBx)*pourDir/240+0.5);
+    const crest=Math.exp(-Math.pow((x-pourBx)/120,2))*Math.abs(pourSy2-sy)*0.22*Math.sin(Math.PI*pour.p);
+    sy = sy + (pourSy2-sy)*k - crest*motionScale;
+  }
+  return sy + S.slosh*x
+    + S.amp*Math.sin(x*0.022 + S.phase)*motionScale
+    + 2.2*motionScale*Math.sin(x*0.013 + S.t*1.1) + 1.2*motionScale*Math.sin(x*0.031 - S.t*0.7);
+}
+
+/* ---------------- Dot (the assistant) ---------------- */
+const dot = { x:W/2, y:H*0.65, vx:0, vy:0, r:U*0.06, squash:1, squashV:0, blink:0, face:0, faceUntil:0 };
+let bubbles=[];
+function spawnBubble(deep){ return { x:(Math.random()-.5)*Math.max(W,H), y:deep?Math.random()*H*0.6+H*0.2:0, r:0.8+Math.random()*2.2, v:8+Math.random()*16, w:Math.random()*6.28 }; }
+for(let i=0;i<(REDUCED?4:10);i++) bubbles.push(spawnBubble(true));
+
+/* ---------------- Interface layer ---------------- */
+const ui = document.getElementById('ui'), overlay=document.getElementById('overlay'), scene=document.getElementById('scene');
+let uiSnap = 0, uiAngle = 0;                      // radians (multiples of PI/2)
+const flip = { on:false, t:0, to:0 };             // the slow inversion: liquid falls first, interface re-emerges after
+let uiFade = 1;                                    // alpha for the canvas-drawn interface bits (number, plinth)
+function layoutUI(snap){
+  const sideways = Math.abs(Math.round(snap/(Math.PI/2)))%2===1;
+  ui.style.width  = (sideways?H:W)+'px';
+  ui.style.height = (sideways?W:H)+'px';
+}
+layoutUI(0);
+
+/* ---------------- Main loop ---------------- */
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000); last=now; S.t+=dt;
+
+  // smooth container angle toward gravity (shortest path), tilt capped so it stays water-like, not a landslide
+  const rawTarget=angleOf(grav);
+  const rel=wrap(rawTarget-uiSnap);
+  const MT=maxTilt(); const target=uiSnap + Math.max(-MT, Math.min(MT, rel));
+  const prev=S.theta;
+  const diff=wrap(target-S.theta);
+  S.theta += diff*Math.min(1, dt*(flip.on?2.0:9));
+  const omega = wrap(S.theta-prev)/dt;
+  S.omega += (omega-S.omega)*Math.min(1,dt*12);
+
+  // slosh spring driven by rotation speed
+  const k=38, c=5.5;
+  S.sloshV += (-k*S.slosh - c*S.sloshV - S.omega*0.55)*dt;
+  S.slosh  += S.sloshV*dt;
+  S.slosh   = Math.max(-0.45, Math.min(0.45, S.slosh));
+  if(flip.on){ S.slosh*=0.985; S.amp=Math.min(S.amp, 14); }   // keep the fall heavy, not frantic
+  // travelling wave amplitude excited by motion, decays
+  S.amp += Math.abs(S.omega)*40*dt;
+  S.amp *= Math.exp(-dt*1.6); S.amp=Math.min(S.amp, 26);
+  S.phase += dt*(3 + Math.abs(S.omega));
+
+  // sideways pour between productions
+  DRAIN += (drainTarget-DRAIN)*Math.min(1,dt*(drainTarget>DRAIN?1.1:1.6));
+  const keep = 1-DRAIN;
+  let shownFill = FILL;
+  if(pour.on){
+    pour.p = Math.max(0, Math.min(1, pour.p + pour.rate*dt));
+    pourText();
+    const e=REDUCED?1:ease5(pour.p);                             // slow in, slow out — the front glides
+    const R0=Math.hypot(W,H)/2+60;
+    pourDir = pour.dir; pourBx = pour.dir*R0*(1-2*e);      // front sweeps from the incoming edge across
+    pourSy2 = surfaceLevel(S.theta, pour.to*keep);
+    shownFill = pour.from + (pour.to-pour.from)*e;
+    if(pour.p>=1) finishPour();
+    else if(pour.p<=0) cancelPour();
+  }else if(FILL!==fillTarget){ FILL=fillTarget; }
+  COMMIT += (commitTarget-COMMIT)*Math.min(1,dt*1.2);
+  MOOD += (moodTarget-MOOD)*Math.min(1,dt*0.8);
+  if(coverTarget!=null){ COVER = COVER==null? coverTarget : COVER + (coverTarget-COVER)*Math.min(1,dt*1.5); }
+  // numShown is driven by the number's position (see below)
+  const sy = surfaceLevel(S.theta, (pour.on?pour.from:FILL)*keep + 0.012*DRAIN);
+  const cs=Math.cos(S.theta), sn=Math.sin(S.theta);
+  const toFrame=(x,y)=>{ x-=W/2; y-=H/2; return [x*cs+y*sn, -x*sn+y*cs]; };
+  const toScreen=(fx,fy)=>[ fx*cs - fy*sn + W/2, fx*sn + fy*cs + H/2 ];
+
+  /* Dot physics in gravity frame */
+  {
+    let [fx,fy]=toFrame(dot.x,dot.y);
+    let [vx,vy]=[dot.vx*cs+dot.vy*sn, -dot.vx*sn+dot.vy*cs];
+    const surf = surfaceY(fx,sy);
+    const rest = surf + dot.r*1.3 + (dot.sink||0);       // floats with its crown just breaking the surface
+    const under = Math.max(-dot.r*6, Math.min(dot.r*6, fy - rest));   // a big level jump is a bounded force, not a launch
+    const buoy = -under*(REDUCED?18:14);
+    vy += (buoy - vy*4.2)*dt;
+    if(fy < surf + dot.r*0.6){ vy += (surf + dot.r*0.6 - fy)*60*dt; vy*=0.9; }   // can't leave the water: gravity + surface tension above the line
+    const lean = grav.x*cs + grav.y*sn;                  // how far the raw tilt is ahead of the smoothed frame
+    vx += (S.slosh*-260 + S.omega*-220 + lean*700 - vx*1.3 - fx*0.04)*dt;    // a strong tilt pins him against the low wall   // carried by the slosh, thrown by rotation, drifts with the tilt
+    if(!REDUCED) vy += Math.sin(S.t*1.1)*3*dt;          // barely-there bob
+    const vmax=U*2.2; vx=Math.max(-vmax,Math.min(vmax,vx)); vy=Math.max(-vmax,Math.min(vmax,vy));
+    fx += vx*dt; fy += vy*dt;
+    [dot.x,dot.y]=toScreen(fx,fy);
+    dot.vx = vx*cs - vy*sn; dot.vy = vx*sn + vy*cs;
+    // keep inside the glass
+    const m=dot.r+4;
+    if(dot.x<m){dot.x=m; dot.vx=Math.abs(dot.vx)*0.25} if(dot.x>W-m){dot.x=W-m; dot.vx=-Math.abs(dot.vx)*0.25}
+    if(dot.y<m){dot.y=m; dot.vy=Math.abs(dot.vy)*0.25} if(dot.y>H-m){dot.y=H-m; dot.vy=-Math.abs(dot.vy)*0.25}
+    // squash spring
+    dot.squashV += (-(dot.squash-1)*220 - dot.squashV*10)*dt; dot.squash += dot.squashV*dt;
+    dot.blink = Math.max(0, dot.blink - dt);
+    if(dot.face>0.5 && Math.random()<dt*0.18 && !REDUCED) dot.blink=0.14;
+    const wantFace = performance.now()<dot.faceUntil ? 1 : 0;
+    dot.face += (wantFace-dot.face)*Math.min(1,dt*(wantFace?6:2));
+    // when liquidity is thin, it sits lower in the water
+    dot.sink = MOOD*dot.r*0.5;
+  }
+
+  /* ---------- draw ---------- */
+  ctx.clearRect(0,0,W,H);
+  /* ---------- the number: a buoyant object in the interface frame ---------- */
+  {
+    const uiH = parseFloat(ui.style.height)||H;
+    // sample the real surface (pour front, slosh and ripple included) directly under the number
+    const [nsx,nsy] = [W/2 - Math.sin(uiAngle)*num.y, H/2 + Math.cos(uiAngle)*num.y];
+    const [nfx,nfy] = toFrame(nsx,nsy);
+    const surfF = surfaceY(nfx + (pour.on?pourDir*70:0), sy);         // sample a little behind the crest so it rises only once the wave is under it
+    const [ssx,ssy] = toScreen(nfx,surfF);
+    const surfUI = -(ssx-W/2)*Math.sin(uiAngle) + (ssy-H/2)*Math.cos(uiAngle);   // ...as a y in the interface frame
+    // rest just above the surface, but never up into the header — when the glass is very full the number sits in the liquid instead
+    const headerBottom = -uiH/2 + 188;                                  // below the wordmark, episode label and brief
+    const wantBase = surfUI - U*0.06;                                    // baseline just above the surface
+    const fit = (wantBase - headerBottom - 18)/0.86;                     // biggest number that still clears the header
+    const targetSize = Math.max(46, Math.min(U*0.27, fit));
+    if(!num.size) num.size=targetSize; else num.size += (targetSize-num.size)*Math.min(1,dt*6);
+    const nSize = Math.round(num.size);
+    const restY = Math.max(headerBottom + nSize*0.86 + 18, wantBase);
+    num.vy += ((restY - num.y)*(REDUCED?40:26) - num.vy*(REDUCED?14:7))*dt;   // stiff enough to ride the crest, soft enough to lag a touch
+    num.y  += num.vy*dt;
+    const wave = 0, bob = 0;
+    // the digits only change once the front has actually reached them
+    if(pour.on || pourTail>0){
+      const derived = Math.max(0, Math.min(1, 0.5 - (num.y+U*0.06)/uiH));   // level implied by where the number sits
+      numShown += (derived - numShown)*Math.min(1, dt*10);
+      if(!pour.on) pourTail -= dt;
+    } else numShown += (fillTarget*keep - numShown)*Math.min(1, dt*4);
+    const fontN = `300 ${nSize}px "Cormorant Garamond", Georgia, serif`;
+    const fontS = `300 ${Math.round(nSize*0.36)}px "Cormorant Garamond", Georgia, serif`;
+    const fontE = `500 ${U>400?11:10}px Inter, system-ui, sans-serif`;
+    drawNum=(fill, blur)=>{
+      ctx.save();
+      ctx.translate(W/2,H/2); ctx.rotate(uiAngle);
+      ctx.translate(0, num.y + wave*bob*motionScale);
+      // (no ctx.filter blur: it tanks frame rate on phones)
+      ctx.fillStyle=fill; ctx.textBaseline='alphabetic';
+      const txt=String(Math.round(numShown*100));
+      ctx.font=fontN; const wN=ctx.measureText(txt).width;
+      ctx.font=fontS; const wS=ctx.measureText('%').width+8;
+      const x0=-(wN+wS)/2;
+      ctx.font=fontN; ctx.textAlign='left'; ctx.fillText(txt, x0, 0);
+      ctx.font=fontS; ctx.fillText('%', x0+wN+8, 0);
+      ctx.font=fontE; ctx.textAlign='center';
+      const eb='B U D G E T   R E M A I N I N G';
+      const ey=-nSize*0.86;
+      ctx.fillText(eb, 0, ey);
+      ctx.fillRect(-ctx.measureText(eb).width/2-22, ey-4, 3, 3); ctx.fillRect(ctx.measureText(eb).width/2+19, ey-4, 3, 3);
+      ctx.restore();
+    };
+    if(uiFade>0){ ctx.save(); ctx.globalAlpha=uiFade; drawNum('rgba(140,106,53,0.95)', 0); ctx.restore(); }   // ink: drawn first so the liquid genuinely covers it
+  }
+  ctx.save();
+  ctx.translate(W/2,H/2); ctx.rotate(S.theta);
+  const R=Math.hypot(W,H)/2+40;
+
+  // liquid body (kept as a Path2D so the number can be clipped by it)
+  const liquidPath=new Path2D();
+  liquidPath.moveTo(-R, surfaceY(-R,sy));
+  for(let x=-R+12;x<=R;x+=12) liquidPath.lineTo(x, surfaceY(x,sy));
+  liquidPath.lineTo(R,R); liquidPath.lineTo(-R,R); liquidPath.closePath();
+  ctx.beginPath(); ctx.moveTo(-R, surfaceY(-R,sy));
+  for(let x=-R+12;x<=R;x+=12) ctx.lineTo(x, surfaceY(x,sy));
+  ctx.lineTo(R,R); ctx.lineTo(-R,R); ctx.closePath();
+  const depth=Math.hypot(W,H);
+  const g=ctx.createLinearGradient(0,sy,0,sy+depth*0.8);
+  g.addColorStop(0,   mix('#F1A945','#D4A466',MOOD));
+  g.addColorStop(0.22,mix('#DF8A2A','#B98A48',MOOD));
+  g.addColorStop(0.6, mix('#B75F19','#8C6233',MOOD));
+  g.addColorStop(1,   mix('#6E3A0C','#4E3418',MOOD));
+  ctx.fillStyle=g; ctx.fill();
+  ctx.save(); ctx.clip();
+
+  // depth vignette on the sides
+  const vg=ctx.createLinearGradient(-R,0,R,0);
+  vg.addColorStop(0,'rgba(70,30,0,0.28)'); vg.addColorStop(0.3,'rgba(70,30,0,0)'); vg.addColorStop(0.7,'rgba(70,30,0,0)'); vg.addColorStop(1,'rgba(70,30,0,0.28)');
+  ctx.fillStyle=vg; ctx.fillRect(-R,-R,2*R,2*R);
+
+  // bubbles (rise against gravity)
+  ctx.fillStyle='rgba(255,236,200,0.18)'; ctx.strokeStyle='rgba(255,246,225,0.35)'; ctx.lineWidth=0.8;
+  for(const b of bubbles){
+    if(!REDUCED){ b.y -= b.v*dt; b.x += Math.sin(S.t*1.5+b.w)*6*dt; }
+    if(b.y < surfaceY(b.x,sy)+3){ Object.assign(b, spawnBubble(false)); b.y = sy + depth*0.55 + Math.random()*depth*0.2; }
+    ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,6.283); ctx.fill(); ctx.stroke();
+  }
+
+  // surface highlight / meniscus
+  ctx.beginPath(); ctx.moveTo(-R,surfaceY(-R,sy));
+  for(let x=-R+12;x<=R;x+=12) ctx.lineTo(x,surfaceY(x,sy));
+  ctx.strokeStyle='rgba(255,246,222,0.85)'; ctx.lineWidth=2.2; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-R,surfaceY(-R,sy)+5);
+  for(let x=-R+12;x<=R;x+=12) ctx.lineTo(x,surfaceY(x,sy)+5+Math.sin(x*0.05+S.t)*1.2);
+  ctx.strokeStyle='rgba(255,230,170,0.35)'; ctx.lineWidth=6; ctx.stroke();
+  ctx.restore(); // clip
+
+  // soft glow above the surface
+  ctx.beginPath(); ctx.moveTo(-R,surfaceY(-R,sy));
+  for(let x=-R+12;x<=R;x+=12) ctx.lineTo(x,surfaceY(x,sy));
+  ctx.strokeStyle='rgba(225,140,50,0.22)'; ctx.lineWidth=16; ctx.stroke();
+  ctx.restore();
+
+  // this month's bills: a darker band at the bottom of the liquid. What's bright above it is truly free.
+  if(COVER!=null && DRAIN<0.98){
+    const cy = surfaceLevel(S.theta, COVER*keep);
+    const soft=U*0.22;                                   // the band fades in over a long distance, not a line
+    ctx.save(); ctx.translate(W/2,H/2); ctx.rotate(S.theta); ctx.clip(liquidPath);
+    ctx.beginPath(); ctx.moveTo(-R, cy-soft);
+    for(let x=-R+12;x<=R;x+=12) ctx.lineTo(x, cy-soft + S.slosh*x*0.5 + 1.2*motionScale*Math.sin(x*0.012+S.t*0.5));
+    ctx.lineTo(R,R); ctx.lineTo(-R,R); ctx.closePath();
+    const bg=ctx.createLinearGradient(0,cy-soft,0,cy+depth*0.5);
+    const f=soft/(soft+depth*0.5);
+    bg.addColorStop(0,'rgba(110,58,12,0)'); bg.addColorStop(f*0.5,'rgba(110,58,12,0.14)'); bg.addColorStop(f,'rgba(105,54,12,0.38)'); bg.addColorStop(1,'rgba(70,34,6,0.55)');
+    ctx.fillStyle=bg; ctx.fill();
+    ctx.restore();
+    // a small label on the band's edge, in the interface frame — for those who read
+    if(uiFade>0){
+      const uiH = parseFloat(ui.style.height)||H, uiW = parseFloat(ui.style.width)||W, p=prodOf(cur);
+      ctx.save(); ctx.globalAlpha=uiFade*(1-DRAIN); ctx.translate(W/2,H/2); ctx.rotate(uiAngle);
+      ctx.font='500 9px Inter, system-ui, sans-serif'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillStyle='rgba(255,236,210,0.7)';
+      const y=(0.5-COVER)*uiH;
+      ctx.fillText(`DUE THIS MONTH · ${fmt(p.due30)}`.split('').join('\u200A'), uiW/2-24, y+14);
+      ctx.restore();
+    }
+  }
+
+  // overdue money: a crimson stain at the surface, sized by the amount, breathing slowly
+  {
+    const p=prodOf(cur);
+    if(p.overdue.length && DRAIN<0.98){
+      ctx.save(); ctx.translate(W/2,H/2); ctx.rotate(S.theta); ctx.clip(liquidPath);
+      p.overdue.forEach((o,i)=>{
+        const x = (i - (p.overdue.length-1)/2)*U*0.26 - U*0.18;
+        const r = U*(0.05 + 0.10*Math.min(1, Math.sqrt(o.amt/p.budget)*2));
+        const y = surfaceY(x,sy) + r*0.55;
+        const breathe = 0.5 + 0.5*Math.sin(S.t*1.3 + i);
+        const sg=ctx.createRadialGradient(x,y,0,x,y,r*(1.15+0.1*breathe));
+        sg.addColorStop(0,`rgba(150,22,28,${0.62+0.12*breathe})`); sg.addColorStop(0.55,`rgba(140,20,30,${0.34+0.1*breathe})`); sg.addColorStop(1,'rgba(130,20,30,0)');
+        ctx.fillStyle=sg; ctx.beginPath(); ctx.arc(x,y,r*1.3,0,6.283); ctx.fill();
+        // a ring that widens and fades, every few seconds
+        const ph=((S.t*0.35+i*0.4)%1);
+        ctx.strokeStyle=`rgba(150,22,28,${(1-ph)*0.35})`; ctx.lineWidth=1; ctx.beginPath(); ctx.ellipse(x,surfaceY(x,sy)+2,r*(0.6+ph*1.6),r*(0.18+ph*0.5),0,0,6.283); ctx.stroke();
+      });
+      ctx.restore();
+    }
+  }
+
+  // committed funds: a flat, still plinth at the bottom of the interface — the stats always sit on level ground
+  {
+    const uiH = parseFloat(ui.style.height)||H, uiW = parseFloat(ui.style.width)||W;
+    const bandH = Math.max(uiH*Math.max(0.18, Math.min(0.26, COMMIT*keep + 0.10)), 150)*keep;
+    if(bandH>1){
+      ctx.save(); ctx.globalAlpha=uiFade; ctx.translate(W/2,H/2); ctx.rotate(uiAngle);
+      const top=uiH/2-bandH;
+      const feather=U*0.14;
+      const pg=ctx.createLinearGradient(0,top-feather,0,uiH/2);
+      pg.addColorStop(0,'rgba(90,46,10,0)'); pg.addColorStop(feather/(bandH+feather),'rgba(96,50,12,0.66)'); pg.addColorStop(1,'rgba(66,32,6,0.9)');
+      ctx.fillStyle=pg; ctx.fillRect(-uiW/2-2, top-feather, uiW+4, bandH+feather+2);
+      ctx.restore();
+    }
+  }
+  // Dot — drawn after the liquid so he's visible whether he's under the surface or riding on it
+  const drawDot=()=>{
+    const [fx,fy]=toFrame(dot.x,dot.y), r=dot.r, sq=dot.squash;
+    ctx.save(); ctx.translate(fx,fy); ctx.scale(1/Math.sqrt(sq), sq);
+    ctx.beginPath(); ctx.arc(0,0,r,0,6.283);
+    const dg=ctx.createRadialGradient(-r*0.35,-r*0.4,r*0.1, 0,0,r*1.05);
+    dg.addColorStop(0,'#FFD79A'); dg.addColorStop(0.5,'#F5A94E'); dg.addColorStop(1,'#B9651E');
+    ctx.fillStyle=dg; ctx.fill();
+    ctx.beginPath(); ctx.arc(0,0,r,0,6.283); ctx.strokeStyle='rgba(120,65,10,0.25)'; ctx.lineWidth=1.2; ctx.stroke();
+    if(dot.face>0.01){                                    // features only while it's attending to you
+      ctx.globalAlpha=dot.face; ctx.strokeStyle='#4A2C0F'; ctx.lineWidth=Math.max(1.4,r*0.06); ctx.lineCap='round';
+      const ey=-r*0.05, ex=r*0.34, ew=r*0.15, open = dot.blink>0?0.15:1;
+      for(const sgn of [-1,1]){ ctx.beginPath(); ctx.arc(sgn*ex, ey+ew*open*0.4, ew, Math.PI, 2*Math.PI); ctx.stroke(); }
+      ctx.globalAlpha=1;
+    }
+    ctx.restore();
+  };
+  ctx.save(); ctx.translate(W/2,H/2); ctx.rotate(S.theta);
+  drawDot();
+  // the part of him under the surface, seen through the amber
+  ctx.save(); ctx.clip(liquidPath);
+  { const [fx,fy]=toFrame(dot.x,dot.y); ctx.beginPath(); ctx.arc(fx,fy,dot.r*1.02,0,6.283); ctx.fillStyle='rgba(200,120,30,0.30)'; ctx.fill(); }
+  ctx.restore();
+  ctx.restore();
+
+  // below the surface: the number seen through the amber — clipped by the liquid, softened, lifted by the ripple
+  ctx.save();
+  ctx.translate(W/2,H/2); ctx.rotate(S.theta); ctx.clip(liquidPath);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.globalAlpha=uiFade; drawNum('rgba(255,228,180,0.42)', 0); ctx.globalAlpha=1;
+  ctx.restore();
+
+
+  /* ---------- interface rotation (snapped, animated) ---------- */
+  // interface only flips between upright and upside-down; in landscape it stays where it was
+  const upright = Math.abs(wrap(rawTarget)) < 0.6, flipped = Math.abs(wrap(rawTarget-Math.PI)) < 0.6;
+  const snapT = upright?0 : flipped?Math.PI : uiSnap;
+  if(Math.abs(wrap(snapT-uiSnap))>0.01 && !flip.on){
+    uiSnap=snapT; layoutUI(uiSnap);
+    if(REDUCED){ uiAngle=uiSnap; }
+    else { Object.assign(flip,{on:true,t:0,to:uiSnap}); ui.classList.remove('emerging'); ui.classList.add('flipping'); }
+  }
+  if(flip.on){
+    flip.t+=dt;
+    uiFade = Math.max(0, 1-flip.t/0.35);
+    // once the liquid has come to rest at the new bottom, the interface comes back — the right way up
+    if(flip.t>1.7 && Math.abs(wrap(S.theta-target))<0.08){
+      flip.on=false; uiAngle=uiSnap; uiFade=0;
+      ui.style.transform=`translate(-50%,-50%) rotate(${uiAngle}rad)`;
+      ui.classList.remove('flipping'); ui.classList.add('emerging');
+      num.y = 0; num.vy = -60;                                 // the number rises out of the water into place
+    }
+  } else if(uiFade<1){ uiFade=Math.min(1, uiFade+dt/1.1); }
+  else { uiAngle=uiSnap; }
+  ui.style.transform=`translate(-50%,-50%) rotate(${uiAngle}rad)`;
+  overlay.style.transform=ui.style.transform; overlay.style.width=ui.style.width; overlay.style.height=ui.style.height;
+
+  Powder.draw(dt);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ---------------- Sensors ---------------- */
+let sensorSeen=false, motionSeen=false;
+function screenAngle(){ return (screen.orientation && screen.orientation.angle) || window.orientation || 0; }
+function onOrient(e){
+  if(e.beta==null||e.gamma==null) return;
+  sensorSeen=true; Dev.hide();
+  const b=e.beta*Math.PI/180, gm=e.gamma*Math.PI/180;
+  // gravity in device frame: (cos b sin g, -sin b, -cos b cos g)  → screen: x right, y down
+  let gx=Math.cos(b)*Math.sin(gm), gy=Math.sin(b);
+  const len=Math.hypot(gx,gy);
+  if(len<0.12) return;                                   // lying flat: keep last direction
+  gx/=len; gy/=len;
+  // compensate if the OS rotated the viewport anyway
+  const a=-screenAngle()*Math.PI/180, ca=Math.cos(a), sa=Math.sin(a);
+  grav.x = gx*ca - gy*sa; grav.y = gx*sa + gy*ca;
+}
+function onMotion(e){
+  const a=e.accelerationIncludingGravity; if(!a||a.x==null||a.y==null) return;
+  if(sensorSeen) return;                                  // deviceorientation is authoritative when it works
+  
+  motionSeen=true; Dev.hide();
+  const ios = typeof DeviceMotionEvent!=='undefined' && typeof DeviceMotionEvent.requestPermission==='function';
+  const sgn = ios?-1:1;                                   // spec (Android/Chrome): face-up z=+9.8, upright y=+9.8. iOS is inverted.
+  let gx=-sgn*a.x, gy=sgn*a.y; const len=Math.hypot(gx,gy); if(len<1.2) return;
+  gx/=len; gy/=len;
+  const r=-screenAngle()*Math.PI/180, ca=Math.cos(r), sa=Math.sin(r);
+  grav.x = gx*ca - gy*sa; grav.y = gx*sa + gy*ca;
+}
+
+const perm=document.getElementById('perm');
+async function enableMotion(){
+  try{
+    if(typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function'){
+      const r=await DeviceOrientationEvent.requestPermission();
+      if(r!=='granted') return;
+    }
+    if(typeof DeviceMotionEvent!=='undefined' && typeof DeviceMotionEvent.requestPermission==='function'){
+      try{ await DeviceMotionEvent.requestPermission(); }catch(_){}
+    }
+    addEventListener('deviceorientation', onOrient, true);
+    addEventListener('devicemotion', onMotion, true);
+    perm.classList.remove('show'); localStorage.setItem('cost.motion','1');
+    setTimeout(()=>{ if(!sensorSeen && !motionSeen) Mouse.enable(); }, 1500);   // no sensors: tilt with the pointer instead
+  }catch(err){ console.warn(err); }
+}
+perm.addEventListener('click', enableMotion);
+const needsPrompt = typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function';
+const TOUCH = matchMedia('(pointer:coarse)').matches;
+if(needsPrompt && !localStorage.getItem('cost.motion')){
+  // iOS: ask on the first touch, silently; only show the button if that gets refused
+  const first=()=>{ removeEventListener('pointerdown',first,true); enableMotion().then(()=>{ setTimeout(()=>{ if(!sensorSeen&&!motionSeen&&TOUCH) perm.classList.add('show'); },1200); }); };
+  addEventListener('pointerdown', first, true);
+}else{
+  enableMotion();
+  if(TOUCH){ const retry=()=>{ removeEventListener('pointerdown',retry,true); if(!sensorSeen&&!motionSeen) enableMotion(); }; addEventListener('pointerdown', retry, true); }
+}
+/* pointer tilt for desktop / anything without sensors */
+const Mouse=(()=>{ let on=false;
+  function move(e){ if(sensorSeen||motionSeen) return; const nx=(e.clientX/W-0.5)*2; const a=nx*0.3; grav.x=Math.sin(a); grav.y=Math.cos(a); }
+  return { enable(){ if(on||TOUCH) return; on=true; addEventListener('pointermove',move,{passive:true}); } };
+})();
+// try to keep the viewport locked (works in fullscreen / PWA; silently ignored elsewhere)
+try{ screen.orientation && screen.orientation.lock && screen.orientation.lock('portrait').catch(()=>{}); }catch(_){}
+
+/* ---------------- Tap Dot ---------------- */
+const say=document.getElementById('say'); let sayT;
+async function tapDot(){
+  dot.squashV = -3.5; dot.vy -= 16;
+  S.amp = Math.min(26, S.amp + 6); S.sloshV += 0.35;
+  dot.faceUntil = performance.now() + 6000;
+  const pr=prodOf(cur); const text = await Assistant.respond({fill:FILL, production:pr.name, ...pr});
+  say.textContent=text; say.classList.add('on'); Assistant.speak(text);
+  clearTimeout(sayT); sayT=setTimeout(()=>say.classList.remove('on'), 4200);
+}
+/* swipe: the pour runs on its own at the speed you swiped; swipe the other way mid-pour to send it back */
+let sw=null;
+function uiDelta(e, st=sw){ const dx=e.clientX-st.x, dy=e.clientY-st.y; const c=Math.cos(-uiSnap), s=Math.sin(-uiSnap); return [dx*c-dy*s, dx*s+dy*c, dx, dy]; }
+cv.addEventListener('pointerdown', e=>{ sw={x:e.clientX,y:e.clientY,t:performance.now()}; closeMenu(); try{ cv.setPointerCapture(e.pointerId); }catch(_){} });
+let lastEnd=0;
+function endDrag(e){
+  if(!sw) return; const st=sw; sw=null; lastEnd=performance.now();
+  const [ux,uy]=uiDelta(e, st), ms=Math.max(40, performance.now()-st.t);
+  if(Math.abs(ux)>48 && Math.abs(ux)>Math.abs(uy)*1.3){
+    const dir=ux<0?1:-1, speed=Math.abs(ux)/ms*1000;                      // px/s
+    const rate=Math.max(0.2, Math.min(0.85, speed/Math.min(W,H)*0.55));   // slow swipe ≈ 5 s, quick flick ≈ 1.2 s
+    if(pour.on){ if(dir!==pour.dir){ pour.rate=-rate; } else { pour.rate=Math.max(pour.rate,rate); } return; }
+    if(beginPour(dir)){ pour.rate=rate; S.sloshV += dir*0.2*Math.min(1.6,rate*2); num.vy += 40; dot.vx += -dir*60*rate; }
+    else S.sloshV += dir*0.6;
+    return;
+  }
+  if(Math.hypot(e.clientX-st.x, e.clientY-st.y)<12 && Math.hypot(e.clientX-dot.x, e.clientY-dot.y) < dot.r*1.4) tapDot();
+}
+cv.addEventListener('pointerup', endDrag);
+cv.addEventListener('pointercancel', ()=>{});                       // ignore: a real pointerup usually follows on touch
+// touch fallback for browsers that cancel pointer events mid-gesture
+let tsw=null;
+cv.addEventListener('touchstart', e=>{ const t=e.touches[0]; tsw={x:t.clientX,y:t.clientY,t:performance.now()}; }, {passive:true});
+cv.addEventListener('touchend', e=>{ if(!tsw) return; const t=e.changedTouches[0]; if(performance.now()-lastEnd>200){ sw=tsw; endDrag({clientX:t.clientX,clientY:t.clientY}); } tsw=null; }, {passive:true});
+
+function beginPour(dir){
+  const n=CONFIG.productions.length, next=cur+dir;
+  if(next<0||next>=n) return false;
+  Object.assign(pour,{on:true,p:0,dir,from:FILL,to:prodOf(next).fill,next,textOn:cur,rate:0});
+  S.amp = Math.min(26, S.amp + 5);
+  return true;
+}
+function pourText(){                                             // labels cross over with the front
+  const want = pour.p>0.5 ? pour.next : cur;
+  if(want!==pour.textOn){ pour.textOn=want; showText(want, pour.dir*(want===pour.next?1:-1)); }
+}
+function finishPour(){ pour.on=false; FILL=pour.to; pourTail=1.2; cur=pour.next; const p=prodOf(cur); fillTarget=p.fill; commitTarget=p.commitFrac; moodTarget=p.concern; coverTarget=p.cover; prevIndex=cur; pager(); }
+function cancelPour(){ pour.on=false; FILL=pour.from; pourTail=0.6; if(pour.textOn!==cur) showText(cur,-pour.dir); }
+
+let wheelAcc=0, wheelT=0;
+addEventListener('wheel', e=>{
+  if(sheet.classList.contains('open')||paper.classList.contains('open')) return;
+  const now=performance.now(); if(now-wheelT<1400){ return; }
+  const d = Math.abs(e.deltaX)>Math.abs(e.deltaY)? e.deltaX : e.deltaY;
+  wheelAcc += d; if(Math.abs(wheelAcc)<40) return;
+  wheelT=now; const dir=wheelAcc>0?1:-1; wheelAcc=0; switchProduction(dir);
+},{passive:true});
+addEventListener('keydown', e=>{ if(e.key==='PageDown'||e.key===']') switchProduction(1); if(e.key==='PageUp'||e.key==='[') switchProduction(-1); });
+function switchProduction(dir){
+  if(pour.on) return;
+  if(!beginPour(dir)){ S.sloshV += dir*0.6; return; }      // edge: just a nudge
+  pour.rate = 0.3;                                          // ~3.3 s, for wheel / keys
+  S.sloshV += dir*0.35; num.vy += 60; dot.vx += -dir*70;
+}
+
+/* ---------------- Actions menu ---------------- */
+const menu=document.getElementById('menu'), actBtn=document.getElementById('actBtn');
+function setMenu(o){ menu.classList.toggle('open',o); actBtn.classList.toggle('open',o); actBtn.setAttribute('aria-expanded',o); }
+function closeMenu(){ setMenu(false); }
+let menuLock=0;
+function toggleMenu(e){ e.preventDefault(); e.stopPropagation(); const now=performance.now(); if(now-menuLock<400) return; menuLock=now; setMenu(!menu.classList.contains('open')); }
+actBtn.addEventListener('pointerup', toggleMenu);
+actBtn.addEventListener('click', toggleMenu);
+actBtn.addEventListener('pointerdown', e=>e.stopPropagation());
+menu.addEventListener('click', e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  closeMenu();
+  if(b.dataset.act==='attention') openSheet();
+  else if(b.dataset.act==='invoices') openPaper();
+  else console.log('action:', b.dataset.act);   // TODO route to the real Cost. screens
+});
+
+/* ---------------- Take Action screen (mock) ---------------- */
+const sheet=$('sheet');
+function openSheet(){
+  const p=prodOf(cur);
+  p.actions = p.actions || [
+    ...p.obligations.filter(o=>o.days<=7).map(o=>({t:o.t, s:o.days<0?`${o.who} · ${-o.days} day${-o.days===1?'':'s'} overdue`:o.days===0?`${o.who} · due today`:`${o.who} · due ${dayName(o.days)}`, amt:o.amt, k:o.days<0?'late':'', verb:'Pay'})),
+    ...(p.approvals||[]).map(a=>({...a, k:'soft', verb:'Approve'})),
+  ];
+  CONFIG.productions[cur].actions = p.actions;
+  const open=p.actions.filter(a=>!a.done);
+  $('sheetSub').textContent = `${p.name} · ${open.length} item${open.length===1?'':'s'} · ${fmt(open.reduce((t,a)=>t+a.amt,0))} · ${fmt(p.available)} available`;
+  $('sheetList').innerHTML = p.actions.length ? p.actions.map((a,i)=>`
+    <div class="item ${a.done?'done':''}" data-i="${i}"><div class="d ${a.k}"></div>
+      <div class="t"><strong>${a.t}</strong><span>${a.s}</span>
+        <div class="chips"><button class="chip primary" data-do="approve">${a.verb}</button><button class="chip" data-do="later">Later</button></div></div>
+      <em>${fmt(a.amt)}</em></div>`).join('') : '<div class="empty">Nothing needs attention.</div>';
+  sheet.classList.add('open'); sheet.setAttribute('aria-hidden','false');
+}
+function closeSheet(){ sheet.classList.remove('open'); sheet.setAttribute('aria-hidden','true'); }
+$('sheetBack').addEventListener('click', closeSheet);
+$('sheetList').addEventListener('click', e=>{
+  const c=e.target.closest('.chip'); if(!c) return;
+  const item=c.closest('.item'), a=(CONFIG.productions[cur].actions||[])[+item.dataset.i]; if(!a) return;
+  if(c.dataset.do==='approve'){ a.done=true; item.classList.add('done'); }
+  else { item.style.opacity=.6; }
+});
+
+/* ---------------- Invoices: the liquid spills onto a page ---------------- */
+const paper=$('paper'); let paperT;
+function openPaper(){
+  const p=prodOf(cur), inv=p.invoices||[], open=inv.filter(i=>i.k!=='paid');
+  $('paperSub').textContent=`${p.name} · ${open.length} open · ${fmt(open.reduce((t,i)=>t+i.amt,0))} outstanding`;
+  $('paperList').innerHTML = inv.map(i=>`<div class="inv ${i.k}"><div class="t"><strong>${i.v}</strong><span>${i.n}</span><div class="st">${i.st}</div></div><em>${fmt(i.amt)}</em></div>`).join('')||'<div class="empty">No invoices yet.</div>';
+  drainTarget=1; S.amp=Math.min(26,S.amp+8); S.sloshV-=0.5; num.vy+=120;
+  scene.classList.add('laid');                            // the glass softens and blows away as powder
+  // splash: one big puddle low on the page, droplets around it
+  Powder.burst();
+  clearTimeout(paperT);
+  paperT=setTimeout(()=>{
+    paper.classList.add('open'); paper.setAttribute('aria-hidden','false');
+    // invoices come through the puddle one by one
+    paper.querySelectorAll('header,.inv,.empty').forEach((el,k)=>el.style.animationDelay=(REDUCED?0:600+k*120)+'ms');
+  }, REDUCED?0:1000);
+}
+function closePaper(){
+  clearTimeout(paperT);
+  paper.classList.remove('open'); paper.setAttribute('aria-hidden','true');
+  setTimeout(()=>{ scene.classList.remove('laid'); drainTarget=0; S.amp=Math.min(26,S.amp+10); }, 300);   // stand the glass back up and refill
+}
+$('paperBack').addEventListener('click', closePaper);
+
+/* ---------------- Powder: the liquid breaks into fine grains and drifts off ---------------- */
+const Powder=(()=>{
+  let grains=[];
+  return {
+    burst(){
+      if(REDUCED) return;
+      grains=[];
+      const R=Math.hypot(W,H)/2, cs=Math.cos(S.theta), sn=Math.sin(S.theta);
+      const sy=surfaceLevel(S.theta, FILL*(1-DRAIN));
+      for(let i=0;i<260;i++){
+        const fx=(Math.random()-.5)*Math.min(W,H)*1.1, fy=sy+Math.random()*(R-sy)*0.9;   // inside the liquid, gravity frame
+        const x=fx*cs-fy*sn+W/2, y=fx*sn+fy*cs+H/2;
+        if(x<0||x>W||y<0||y>H) continue;
+        grains.push({x,y, vx:(Math.random()-.5)*8, vy:-6-Math.random()*22, r:0.5+Math.random()*1.3,
+          life:0, ttl:2.2+Math.random()*2.0, delay:Math.random()*1.1, w:Math.random()*6.28,
+          c: Math.random()<0.7?'232,150,52':'250,200,120'});
+      }
+    },
+    draw(dt){
+      if(!grains.length) return;
+      const gx=-grav.x*8, gy=-grav.y*8;   // grains lift gently against gravity
+      for(const g of grains){
+        g.life+=dt; if(g.life<g.delay) continue;
+        const a=g.life-g.delay; g.vx+=(gx+Math.sin(S.t*2+g.w)*18)*dt; g.vy+=gy*dt;
+        g.x+=g.vx*dt; g.y+=g.vy*dt;
+        const al=Math.max(0, 1-a/g.ttl)*0.85;
+        ctx.fillStyle=`rgba(${g.c},${al})`; ctx.beginPath(); ctx.arc(g.x,g.y,g.r,0,6.283); ctx.fill();
+      }
+      grains=grains.filter(g=>g.life-g.delay<g.ttl);
+    }
+  };
+})();
+
+/* ---------------- Puddle (unused now, kept for reference) ---------------- */
+const Puddle=(()=>{
+  let cv2=null, c2=null, t0=0, fill=0.5, seed=0;
+  const harm=[[3,0.10],[5,0.05],[2,0.07],[7,0.025]];             // gentle irregularity, no lobes
+  function radius(a,t){ let r=1; for(const [n,amp] of harm) r+=amp*Math.sin(n*a+seed+t*0.12*n); return r; }
+  return {
+    start(f){ fill=f; seed=Math.random()*6.28; t0=performance.now(); cv2=$('puddle'); c2=cv2.getContext('2d'); },
+    draw(now){
+      if(!cv2||!paper.classList.contains('open')) return;
+      const w=parseFloat(overlay.style.width)||W, h=parseFloat(overlay.style.height)||H;
+      if(cv2.width!==Math.round(w*DPR)){ cv2.width=w*DPR; cv2.height=h*DPR; }
+      c2.setTransform(DPR,0,0,DPR,0,0); c2.clearRect(0,0,w,h);
+      const t=(now-t0)/1000, spread=REDUCED?1:1-Math.pow(1-Math.min(1,t/3.4),3);   // slow ease-out spread
+      // target area = what was in the glass; an ellipse wider than tall, centred low
+      const A=fill*w*h*0.9, ratio=1.45;
+      const ry=Math.sqrt(A/(Math.PI*ratio))*spread, rx=ry*ratio;
+      const cx=w/2, cy=h*0.68;
+      c2.save(); c2.translate(cx,cy);
+      c2.beginPath();
+      for(let i=0;i<=96;i++){ const a=i/96*Math.PI*2, r=radius(a,t); const x=Math.cos(a)*rx*r, y=Math.sin(a)*ry*r; i?c2.lineTo(x,y):c2.moveTo(x,y); }
+      c2.closePath();
+      const g=c2.createRadialGradient(-rx*0.2,-ry*0.3,0, 0,0,Math.max(rx,ry)*1.05);
+      g.addColorStop(0,'rgba(240,176,88,0.60)'); g.addColorStop(0.55,'rgba(222,148,50,0.55)'); g.addColorStop(1,'rgba(196,118,34,0.50)');
+      c2.fillStyle=g; c2.fill();
+      c2.strokeStyle='rgba(255,240,210,0.55)'; c2.lineWidth=1.5; c2.stroke();     // wet rim
+      c2.restore();
+    }
+  };
+})();
+
+/* ---------------- DEV ONLY: orientation simulator ---------------- */
+const Dev = (()=>{
+  const el=document.getElementById('dev'), pad=document.getElementById('pad'), knob=pad.querySelector('i');
+  let simAngle=0, shown=false;
+  const set=(x,y)=>{ const l=Math.hypot(x,y)||1; grav.x=x/l; grav.y=y/l; knob.style.left=(50+grav.x*42)+'%'; knob.style.top=(50+grav.y*42)+'%'; };
+  const setAngle=deg=>{ simAngle=deg; const a=deg*Math.PI/180; set(Math.sin(a), Math.cos(a)); };
+  el.querySelectorAll('[data-o]').forEach(b=>b.addEventListener('click',()=>setAngle(+b.dataset.o)));
+  let dragging=false;
+  const fromEvt=e=>{ const r=pad.getBoundingClientRect(); set((e.clientX-r.left)/r.width*2-1, (e.clientY-r.top)/r.height*2-1); };
+  pad.addEventListener('pointerdown',e=>{dragging=true; pad.setPointerCapture(e.pointerId); fromEvt(e)});
+  pad.addEventListener('pointermove',e=>dragging&&fromEvt(e));
+  pad.addEventListener('pointerup',()=>dragging=false);
+  addEventListener('keydown',e=>{
+    if(e.key==='ArrowLeft') setAngle(simAngle-15);
+    if(e.key==='ArrowRight') setAngle(simAngle+15);
+    if(e.key==='ArrowUp') setAngle(0);
+    if(e.key==='ArrowDown') setAngle(180);
+    if(e.key.toLowerCase()==='d'){ shown=!shown; el.classList.toggle('show',shown); }
+  });
+  // auto-show if no sensor data arrives (desktop / simulator)
+  setTimeout(()=>{ if(!sensorSeen && !motionSeen && CONFIG.DEV_CONTROLS && !matchMedia('(pointer:coarse)').matches){ shown=true; el.classList.add('show'); } }, 1500);
+  return { hide(){ if(shown && !localStorage.getItem('cost.devKeep')){ shown=false; el.classList.remove('show'); } } };
+})();
+</script>
+</body>
+</html>
