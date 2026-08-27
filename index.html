@@ -107,6 +107,37 @@ backdrop-filter:blur(8px);width:190px;font-family:ui-monospace,Menlo,monospace}
 #dev .pad::before,#dev .pad::after{content:””;position:absolute;background:#3D3730}
 #dev .pad::before{left:50%;top:0;bottom:0;width:1px}#dev .pad::after{top:50%;left:0;right:0;height:1px}
 #dev p{opacity:.6;margin-top:6px;line-height:1.5}
+
+/* production pager */
+.pager{position:absolute;left:0;right:0;top:calc(84px + env(safe-area-inset-top));display:flex;justify-content:center;gap:7px;pointer-events:none}
+.pager i{width:5px;height:5px;border-radius:50%;background:#C9B48F;opacity:.5;transition:all .3s}
+.pager i.on{background:var(–dot);opacity:1;width:16px;border-radius:3px}
+.fade{transition:opacity .25s}
+.fade.out{opacity:0}
+
+/* Take Action screen */
+.sheet{position:absolute;inset:0;background:rgba(250,245,234,.92);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+transform:translateY(100%);transition:transform .5s cubic-bezier(.2,.8,.2,1);display:flex;flex-direction:column;
+padding:calc(18px + env(safe-area-inset-top)) 22px calc(20px + env(safe-area-inset-bottom));touch-action:pan-y}
+.sheet.open{transform:none}
+.sheet header{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+.sheet header button{width:40px;height:40px;border-radius:50%;border:0;background:#FFF9EF;box-shadow:0 6px 18px rgba(120,80,20,.12);font-size:18px;color:var(–gold-ink);cursor:pointer}
+.sheet h2{font-family:“Cormorant Garamond”,Georgia,serif;font-weight:400;font-size:34px;letter-spacing:-.02em;line-height:1}
+.sheet h2 b{color:var(–dot);font-weight:500}
+.sheet .sub{font-size:12px;color:#9A8A70;letter-spacing:.06em;margin-top:6px}
+.sheet .list{overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch;padding-bottom:20px}
+.item{display:flex;gap:14px;align-items:flex-start;padding:16px 0;border-bottom:1px solid rgba(140,106,53,.16)}
+.item .d{width:10px;height:10px;border-radius:50%;margin-top:6px;flex:none;background:var(–dot)}
+.item .d.late{background:#C8462B}.item .d.soft{background:#C9B48F}
+.item .t{flex:1}
+.item strong{display:block;font-weight:500;font-size:15px;letter-spacing:-.01em}
+.item span{display:block;font-size:12.5px;color:#8A7A60;margin-top:3px;line-height:1.4}
+.item em{font-style:normal;font-family:“Cormorant Garamond”,Georgia,serif;font-size:20px;font-weight:500;white-space:nowrap}
+.item .chips{display:flex;gap:6px;margin-top:10px}
+.chip{padding:6px 12px;border-radius:999px;font-size:11.5px;font-weight:500;border:1px solid rgba(140,106,53,.3);background:transparent;color:var(–gold-ink);cursor:pointer;font-family:inherit}
+.chip.primary{background:var(–ink);color:#FAF5EA;border-color:var(–ink)}
+.item.done{opacity:.35;transition:opacity .4s}
+.sheet .empty{text-align:center;color:#9A8A70;font-size:13px;padding:40px 0}
 </style>
 
 </head>
@@ -116,7 +147,8 @@ backdrop-filter:blur(8px);width:190px;font-family:ui-monospace,Menlo,monospace}
 
 <div id="ui">
   <div class="brand">Cost<b>.</b></div>
-  <div class="prod" id="prod"></div>
+  <div class="prod fade" id="prod"></div>
+  <div class="pager" id="pager"></div>
 
   <button class="act" id="actBtn" aria-label="Actions" aria-expanded="false">
     <svg viewBox="0 0 24 24"><path d="M7 17 17 7M9 7h8v8"/></svg>
@@ -141,6 +173,11 @@ backdrop-filter:blur(8px);width:190px;font-family:ui-monospace,Menlo,monospace}
   </div>
 
   <div class="say" id="say" aria-live="polite"></div>
+
+  <section class="sheet" id="sheet" aria-hidden="true">
+    <header><button id="sheetBack" aria-label="Back">←</button><div><h2>Take action<b>.</b></h2><div class="sub" id="sheetSub"></div></div></header>
+    <div class="list" id="sheetList"></div>
+  </section>
 </div>
 
 <button class="perm" id="perm">Enable motion</button>
@@ -164,20 +201,38 @@ backdrop-filter:blur(8px);width:190px;font-family:ui-monospace,Menlo,monospace}
    Data lives in CONFIG. Replace with Cost. backend later.
    ============================================================ */
 const CONFIG = {
-  production: 'Episode 9',
-  totalBudget: 100000,
-  spent: 50000,
+  productions: [
+    { name:'Episode 9', totalBudget:100000, spent:50000,
+      actions:[
+        {t:'Lux Grip & Electric — Invoice #2231', s:'Net 30 ends Friday · approved, unpaid', amt:8400, k:'late'},
+        {t:'Approve timecards — Week 6', s:'14 crew · submitted by 1st AD', amt:21750, k:''},
+        {t:'Catering deposit — Set Table Co.', s:'Due in 4 days', amt:2200, k:''},
+        {t:'Location permit renewal', s:'Expires Sep 2 · City Film Office', amt:650, k:'soft'},
+      ]},
+    { name:'Episode 10', totalBudget:120000, spent:30000,
+      actions:[
+        {t:'Camera package hold — Panavision', s:'Deposit due to secure dates', amt:12000, k:''},
+        {t:'Approve art dept PO', s:'Set build materials · needs sign-off', amt:4300, k:''},
+      ]},
+  ],
   currency: 'USD',
   DEV_CONTROLS: false,         // press D on desktop to show the simulator
 };
-const remaining = CONFIG.totalBudget - CONFIG.spent;
-const FILL = Math.min(1, Math.max(0, CONFIG.spent / CONFIG.totalBudget));   // liquid fraction by area
 const fmt = n => new Intl.NumberFormat('en-US',{style:'currency',currency:CONFIG.currency,maximumFractionDigits:0}).format(n);
-document.getElementById('prod').textContent = CONFIG.production;
-document.getElementById('pctNum').textContent = Math.round(FILL*100);
-document.getElementById('fTotal').textContent = fmt(CONFIG.totalBudget);
-document.getElementById('fSpent').textContent = fmt(CONFIG.spent);
-document.getElementById('fRemain').textContent = fmt(remaining);
+let cur = 0;                                   // active production index
+let FILL = 0, fillTarget = 0, fillV = 0;       // animated liquid fraction (by area)
+const $ = id => document.getElementById(id);
+function prodOf(i){ const p=CONFIG.productions[i]; return {...p, remaining:p.totalBudget-p.spent, fill:Math.min(1,Math.max(0,p.spent/p.totalBudget))}; }
+function showProduction(i, instant){
+  cur = i; const p = prodOf(i);
+  fillTarget = p.fill; if(instant) FILL = p.fill;
+  const fadeEls=[$('prod'),$('fTotal'),$('fSpent'),$('fRemain')];
+  const apply=()=>{ $('prod').textContent=p.name; $('fTotal').textContent=fmt(p.totalBudget); $('fSpent').textContent=fmt(p.spent); $('fRemain').textContent=fmt(p.remaining); };
+  if(instant) apply(); else { fadeEls.forEach(e=>e.classList.add('out')); setTimeout(()=>{apply(); fadeEls.forEach(e=>e.classList.remove('out'))},260); }
+  $('pager').innerHTML = CONFIG.productions.map((_,k)=>`<i class="${k===i?'on':''}"></i>`).join('');
+}
+['fTotal','fSpent','fRemain'].forEach(id=>$(id).classList.add('fade'));
+showProduction(0, true);
 
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -288,6 +343,9 @@ function frame(now){
   S.amp *= Math.exp(-dt*1.6); S.amp=Math.min(S.amp, 26);
   S.phase += dt*(3 + Math.abs(S.omega));
 
+  // fill level spring (pouring between productions)
+  fillV += ((fillTarget-FILL)*22 - fillV*7)*dt; FILL += fillV*dt;
+  $('pctNum').textContent = Math.round(FILL*100);
   const sy = surfaceLevel(S.theta);
   const cs=Math.cos(S.theta), sn=Math.sin(S.theta);
   const toFrame=(x,y)=>{ x-=W/2; y-=H/2; return [x*cs+y*sn, -x*sn+y*cs]; };
@@ -463,10 +521,24 @@ async function tapDot(){
   say.textContent=text; say.classList.add('on'); Assistant.speak(text);
   clearTimeout(sayT); sayT=setTimeout(()=>say.classList.remove('on'), 4200);
 }
-cv.addEventListener('pointerdown', e=>{
-  if(Math.hypot(e.clientX-dot.x, e.clientY-dot.y) < dot.r*1.4){ tapDot(); return; }
-  closeMenu();
+let sw=null;
+cv.addEventListener('pointerdown', e=>{ sw={x:e.clientX,y:e.clientY,t:performance.now()}; closeMenu(); });
+cv.addEventListener('pointerup', e=>{
+  if(!sw) return; const dx=e.clientX-sw.x, dy=e.clientY-sw.y; sw=null;
+  // swipe measured in the interface's frame, so it works when the UI is rotated
+  const c=Math.cos(-uiSnap), s=Math.sin(-uiSnap); const ux=dx*c-dy*s, uy=dx*s+dy*c;
+  if(Math.abs(ux)>56 && Math.abs(ux)>Math.abs(uy)*1.3){ switchProduction(ux<0?1:-1); return; }
+  if(Math.hypot(dx,dy)<12 && Math.hypot(e.clientX-dot.x, e.clientY-dot.y) < dot.r*1.4) tapDot();
 });
+function switchProduction(dir){
+  const n=CONFIG.productions.length, next=cur+dir;
+  if(next<0||next>=n){ S.sloshV += dir*0.6; return; }      // edge: just a nudge
+  showProduction(next);
+  // pour: lean the surface the way you swiped, kick a wave, then the level spring does the rest
+  S.sloshV += dir*(fillTarget<FILL? 1.6 : -1.6);
+  S.amp = Math.min(26, S.amp + 18);
+  dot.vy -= 30;
+}
 
 /* ---------------- Actions menu ---------------- */
 const menu=document.getElementById('menu'), actBtn=document.getElementById('actBtn');
@@ -474,8 +546,30 @@ function closeMenu(){ menu.classList.remove('open'); actBtn.setAttribute('aria-e
 actBtn.addEventListener('click', e=>{ e.stopPropagation(); const o=!menu.classList.contains('open'); menu.classList.toggle('open',o); actBtn.setAttribute('aria-expanded',o); });
 menu.addEventListener('click', e=>{
   const b=e.target.closest('button'); if(!b) return;
-  console.log('action:', b.dataset.act);   // TODO route to the real Cost. screens
   closeMenu();
+  if(b.dataset.act==='attention') openSheet();
+  else console.log('action:', b.dataset.act);   // TODO route to the real Cost. screens
+});
+
+/* ---------------- Take Action screen (mock) ---------------- */
+const sheet=$('sheet');
+function openSheet(){
+  const p=prodOf(cur), open=p.actions.filter(a=>!a.done);
+  $('sheetSub').textContent = `${p.name} · ${open.length} item${open.length===1?'':'s'} need${open.length===1?'s':''} attention · ${fmt(open.reduce((t,a)=>t+a.amt,0))}`;
+  $('sheetList').innerHTML = p.actions.length ? p.actions.map((a,i)=>`
+    <div class="item ${a.done?'done':''}" data-i="${i}"><div class="d ${a.k}"></div>
+      <div class="t"><strong>${a.t}</strong><span>${a.s}</span>
+        <div class="chips"><button class="chip primary" data-do="approve">Approve</button><button class="chip" data-do="later">Later</button></div></div>
+      <em>${fmt(a.amt)}</em></div>`).join('') : '<div class="empty">Nothing needs attention.</div>';
+  sheet.classList.add('open'); sheet.setAttribute('aria-hidden','false');
+}
+function closeSheet(){ sheet.classList.remove('open'); sheet.setAttribute('aria-hidden','true'); }
+$('sheetBack').addEventListener('click', closeSheet);
+$('sheetList').addEventListener('click', e=>{
+  const c=e.target.closest('.chip'); if(!c) return;
+  const item=c.closest('.item'), a=CONFIG.productions[cur].actions[+item.dataset.i];
+  if(c.dataset.do==='approve'){ a.done=true; item.classList.add('done'); }
+  else { item.style.opacity=.6; }
 });
 
 /* ---------------- DEV ONLY: orientation simulator ---------------- */
