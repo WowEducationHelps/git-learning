@@ -40,15 +40,15 @@ text-transform:uppercase;color:#9A8A70;pointer-events:none}
 
 /* action control */
 .act{position:absolute;right:24px;top:calc(22px + env(safe-area-inset-top));width:52px;height:52px;border-radius:50%;
-border:0;background:#FFF9EF;box-shadow:0 8px 24px rgba(120,80,20,.12),0 1px 0 #fff inset;
+border:0;background:var(–ink);box-shadow:0 10px 26px rgba(40,25,5,.28);
 display:grid;place-items:center;cursor:pointer;transition:transform .25s cubic-bezier(.2,.8,.2,1)}
 .act:active{transform:scale(.92)}
-.act svg{width:20px;height:20px;stroke:var(–dot);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.act svg{width:22px;height:22px;stroke:var(–dot);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .act:focus-visible{outline:2px solid var(–dot);outline-offset:3px}
 
 .menu{position:absolute;right:24px;top:calc(86px + env(safe-area-inset-top));width:236px;
 background:var(–panel);color:#F6EEDF;border-radius:20px;padding:6px 0;
-box-shadow:0 24px 60px rgba(40,25,5,.28);
+box-shadow:0 24px 60px rgba(40,25,5,.4),0 0 0 1px rgba(255,255,255,.06);
 opacity:0;transform:translateY(-8px) scale(.96);transform-origin:top right;
 transition:opacity .22s ease,transform .28s cubic-bezier(.2,.8,.2,1);visibility:hidden}
 .menu.open{opacity:1;transform:none;visibility:visible}
@@ -64,6 +64,7 @@ transition:opacity .22s ease,transform .28s cubic-bezier(.2,.8,.2,1);visibility:
 /* budget used */
 .pct{position:absolute;left:0;right:0;text-align:center;pointer-events:none;
 transform:translateY(-100%)}
+.slide{transition:opacity .3s,transform .45s cubic-bezier(.2,.8,.2,1)}
 .pct .eyebrow{font-size:11px;letter-spacing:.32em;text-transform:uppercase;color:var(–gold-ink);opacity:.85}
 .pct .eyebrow::before,.pct .eyebrow::after{content:”·”;margin:0 14px;opacity:.6}
 .pct .num{font-family:“Cormorant Garamond”,Georgia,serif;font-weight:300;font-size:132px;line-height:.9;
@@ -220,15 +221,23 @@ const CONFIG = {
 };
 const fmt = n => new Intl.NumberFormat('en-US',{style:'currency',currency:CONFIG.currency,maximumFractionDigits:0}).format(n);
 let cur = 0;                                   // active production index
-let FILL = 0, fillTarget = 0, fillV = 0;       // animated liquid fraction (by area)
+let FILL = 0, fillTarget = 0;                  // liquid fraction (by area); FILL = outgoing level during a pour
+const pour = { on:false, p:0, dir:1, from:0, to:0 };   // sideways pour between productions
 const $ = id => document.getElementById(id);
 function prodOf(i){ const p=CONFIG.productions[i]; return {...p, remaining:p.totalBudget-p.spent, fill:Math.min(1,Math.max(0,p.spent/p.totalBudget))}; }
+let prevIndex=0;
 function showProduction(i, instant){
   cur = i; const p = prodOf(i);
   fillTarget = p.fill; if(instant) FILL = p.fill;
   const fadeEls=[$('prod'),$('fTotal'),$('fSpent'),$('fRemain')];
   const apply=()=>{ $('prod').textContent=p.name; $('fTotal').textContent=fmt(p.totalBudget); $('fSpent').textContent=fmt(p.spent); $('fRemain').textContent=fmt(p.remaining); };
-  if(instant) apply(); else { fadeEls.forEach(e=>e.classList.add('out')); setTimeout(()=>{apply(); fadeEls.forEach(e=>e.classList.remove('out'))},260); }
+  const slideEls=[$('prod'),$('pct'),$('fTotal'),$('fSpent'),$('fRemain')];
+  if(instant) apply(); else {
+    const dir=i>prevIndex?1:-1;
+    slideEls.forEach(e=>{e.classList.add('slide'); e.style.opacity=0; e.style.transform=(e.id==='pct'?'translateY(-100%) ':'')+`translateX(${-dir*36}px)`;});
+    setTimeout(()=>{ apply(); slideEls.forEach(e=>{e.style.transition='none'; e.style.transform=(e.id==='pct'?'translateY(-100%) ':'')+`translateX(${dir*36}px)`; void e.offsetWidth; e.style.transition=''; e.style.opacity=1; e.style.transform=(e.id==='pct'?'translateY(-100%)':'');}); },300);
+  }
+  prevIndex=i;
   $('pager').innerHTML = CONFIG.productions.map((_,k)=>`<i class="${k===i?'on':''}"></i>`).join('');
 }
 ['fTotal','fSpent','fRemain'].forEach(id=>$(id).classList.add('fade'));
@@ -289,8 +298,8 @@ function areaBelow(poly, sy){
   let A=0; for(let i=0;i<out.length;i++){ const p=out[i], q=out[(i+1)%out.length]; A+=p[0]*q[1]-q[0]*p[1]; }
   return Math.abs(A)/2;
 }
-function surfaceLevel(theta){
-  const poly=rectInFrame(theta), target=FILL*W*H, R=Math.hypot(W,H)/2;
+function surfaceLevel(theta, fill=FILL){
+  const poly=rectInFrame(theta), target=fill*W*H, R=Math.hypot(W,H)/2;
   let lo=-R, hi=R;
   for(let i=0;i<28;i++){ const m=(lo+hi)/2; (areaBelow(poly,m)>target)?lo=m:hi=m; }
   return (lo+hi)/2;
@@ -298,7 +307,15 @@ function surfaceLevel(theta){
 
 /* wave shape in frame coordinates */
 const motionScale = REDUCED ? 0.25 : 1;
+let pourSy2=0, pourBx=0, pourDir=1;
+const smooth=t=>{t=Math.max(0,Math.min(1,t)); return t*t*(3-2*t)};
 function surfaceY(x, sy){
+  if(pour.on){
+    // new level takes over on the side the swipe came from and sweeps across, with a crest at the front
+    const k=smooth((x-pourBx)*pourDir/140+0.5);
+    const crest=Math.exp(-Math.pow((x-pourBx)/90,2))*Math.abs(pourSy2-sy)*0.35*(pour.p<0.9?1:(1-pour.p)*10);
+    sy = sy + (pourSy2-sy)*k - crest*motionScale;
+  }
   return sy + S.slosh*x
     + S.amp*Math.sin(x*0.022 + S.phase)*motionScale
     + 2.2*motionScale*Math.sin(x*0.013 + S.t*1.1) + 1.2*motionScale*Math.sin(x*0.031 - S.t*0.7);
@@ -343,10 +360,19 @@ function frame(now){
   S.amp *= Math.exp(-dt*1.6); S.amp=Math.min(S.amp, 26);
   S.phase += dt*(3 + Math.abs(S.omega));
 
-  // fill level spring (pouring between productions)
-  fillV += ((fillTarget-FILL)*22 - fillV*7)*dt; FILL += fillV*dt;
-  $('pctNum').textContent = Math.round(FILL*100);
-  const sy = surfaceLevel(S.theta);
+  // sideways pour between productions
+  let shownFill = FILL;
+  if(pour.on){
+    pour.p = Math.min(1, pour.p + dt/(REDUCED?0.01:1.05));
+    const e=smooth(pour.p);
+    const R0=Math.hypot(W,H)/2+60;
+    pourDir = pour.dir; pourBx = pour.dir*R0*(1-2*e);      // front sweeps from the incoming edge across
+    pourSy2 = surfaceLevel(S.theta, pour.to);
+    shownFill = pour.from + (pour.to-pour.from)*e;
+    if(pour.p>=1){ pour.on=false; FILL=pour.to; }
+  }else if(FILL!==fillTarget){ FILL=fillTarget; }
+  $('pctNum').textContent = Math.round(shownFill*100);
+  const sy = surfaceLevel(S.theta, pour.on?pour.from:FILL);
   const cs=Math.cos(S.theta), sn=Math.sin(S.theta);
   const toFrame=(x,y)=>{ x-=W/2; y-=H/2; return [x*cs+y*sn, -x*sn+y*cs]; };
   const toScreen=(fx,fy)=>[ fx*cs - fy*sn + W/2, fx*sn + fy*cs + H/2 ];
@@ -533,11 +559,12 @@ cv.addEventListener('pointerup', e=>{
 function switchProduction(dir){
   const n=CONFIG.productions.length, next=cur+dir;
   if(next<0||next>=n){ S.sloshV += dir*0.6; return; }      // edge: just a nudge
-  showProduction(next);
-  // pour: lean the surface the way you swiped, kick a wave, then the level spring does the rest
-  S.sloshV += dir*(fillTarget<FILL? 1.6 : -1.6);
-  S.amp = Math.min(26, S.amp + 18);
-  dot.vy -= 30;
+  if(pour.on) return;
+  const from=FILL; showProduction(next);
+  Object.assign(pour,{on:true,p:0,dir,from,to:fillTarget});
+  // the swipe direction: content comes in from the right when swiping left (dir=1)
+  S.sloshV += dir*0.9; S.amp = Math.min(26, S.amp + 14);
+  dot.vx += -dir*140; dot.vy -= 20;
 }
 
 /* ---------------- Actions menu ---------------- */
